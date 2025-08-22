@@ -140,12 +140,15 @@ class DataService():
         }
 
 if __name__ == "__main__":
+    def get_testdata(file):
+        return os.path.join('..', "resources", file)
+
     datacomp = DataService("")
-    data = datacomp.get_data(".venv/resources/dataset_a.csv")
+    data = datacomp.get_data(get_testdata('dataset_a.csv'))
     # print(data.head(10))
-    data2 = datacomp.get_data(".venv/resources/dataset_b.xlsx")
+    data2 = datacomp.get_data(get_testdata('dataset_b.xlsx'))
     # print(data2.head(10))
-    res = datacomp.compare_columns(data, data2, "id", "id")
+    res = datacomp.compare_columns(data, data2, "id", "client_id")
     print(res["matches"])
     print(res["left_only"])
     print(res["right_only"])
