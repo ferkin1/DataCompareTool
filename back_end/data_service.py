@@ -5,7 +5,7 @@ import traceback
 from typing import List, Sequence, Union, Dict, Optional, Tuple
 
 class DataService():
-    def __init__(self, export_path:str):
+    def __init__(self, export_path:str=None):
         self.export_path:str = export_path
         self.Cols = Union[str, Sequence[str]]
 
@@ -153,3 +153,4 @@ if __name__ == "__main__":
     print(res["left_only"])
     print(res["right_only"])
     print(res["merged"])
+    print(res["matches"].describe())

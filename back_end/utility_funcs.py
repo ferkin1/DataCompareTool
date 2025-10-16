@@ -1,7 +1,6 @@
 
 
 
-
 def build_ext_filter(ext_map: dict[str, list[str]]) -> str:
     ext_parts = []
     for label, exts in ext_map.items():
