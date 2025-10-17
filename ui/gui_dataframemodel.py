@@ -46,3 +46,15 @@ class DataFrameModel(QAbstractTableModel):
             return str(self._df.index[section])
         except Exception:
             return str(section)
+
+    def sort(self, column, order):
+        if self._df is None or self._df.empty:
+            return
+        col_name = self._df.columns[column]
+        ascending = order == Qt.SortOrder.AscendingOrder
+        self.layoutAboutToBeChanged.emit()
+        self._df.sort_values(by=col_name,
+                             ascending=ascending,
+                             inplace=True,
+                             ignore_index=True)
+        self.layoutChanged.emit()

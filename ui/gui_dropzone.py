@@ -1,8 +1,8 @@
-from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton,
+from PySide6.QtWidgets import (QApplication, QPushButton,
                                QWidget, QVBoxLayout, QFrame,
                                QLabel, QFileDialog, QTableView, QStackedLayout, QHBoxLayout, QPlainTextEdit,
-                               QSizePolicy)
-from PySide6.QtCore import Qt, Signal
+                               QSizePolicy, QHeaderView, QAbstractItemView, QMenu)
+from PySide6.QtCore import Qt, Signal, QItemSelection, QItemSelectionModel, QModelIndex
 from back_end import build_ext_filter
 from ui.gui_dataframemodel import DataFrameModel
 import pandas as pd
@@ -129,30 +129,51 @@ class DropZoneUI(QFrame):
             self.fileSelected.emit(filename)
 
     def set_preview(self, df: pd.DataFrame, source_path: str | None = None):
-        self._model.set_df(df if df is not None else pd.DataFrame())
+        preview_df = df.head(20).copy()
+        self._model.set_df(preview_df if preview_df is not None else pd.DataFrame())
 
+        # Table
         self._table.setMinimumHeight(160)
-        self._table.setMaximumWidth(400)
-        self._table.setSortingEnabled(True)
+        self._table.setMinimumWidth(100)
+        self._table.setSortingEnabled(False)
         self._table.setAcceptDrops(False)
         self._table.resizeColumnsToContents()
         self._table.resizeRowsToContents()
-        self._table.verticalHeader().setVisible(False)
         self._table.setFrameShape(QFrame.NoFrame)
         self._table.setShowGrid(True)
-        self._table.horizontalHeader().setStretchLastSection(False)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectColumns)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
-        header = self._table.horizontalHeader()
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        # Headers
+        vert_header = self._table.verticalHeader()
+        vert_header.setVisible(True)
+        vert_header.setFixedWidth(25)
+
+        h_header = self._table.horizontalHeader()
+        h_header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        h_header.setStretchLastSection(False)
+        h_header.setDefaultSectionSize(50)
+        h_header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        self._table.resizeColumnsToContents()
+
+        MAX_WIDTH = 60
+        for col in range(self._model.columnCount()):
+            width = min(self._table.columnWidth(col), MAX_WIDTH)
+            self._table.setColumnWidth(col, width)
+            h_header.setSectionResizeMode(col, QHeaderView.Fixed)
+
+        h_header.setSectionsClickable(True)
+        h_header.setSectionResizeMode(QHeaderView.Interactive)
+        h_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        h_header.customContextMenuRequested.connect(self._on_header_menu)
+        h_header.sectionClicked.connect(self._on_header_click)
+
+
         if source_path:
             name = os.path.basename(source_path)
             self.set_status_text(f"{name} :: {len(df)} rows :: {len(df.columns)} columns")
         self.stack.setCurrentIndex(1)
 
-    def clear_preview(self):
-        self._model.set_df(pd.DataFrame())
-        self.status.setText("")
-        self.stack.setCurrentIndex(0)
 
     def set_status_text(self, text: str, tooltip: bool = True):
         self.status.setPlainText(text)
@@ -161,3 +182,76 @@ class DropZoneUI(QFrame):
 
         self.status.horizontalScrollBar().setValue(0)
 
+    def _on_header_click(self, col: int):
+        selection_model = self._table.selectionModel()
+        if self._model.rowCount() == 0:
+            return
+
+        item_range = self._col_range_selection(col)
+        mods = QApplication.keyboardModifiers()
+        press_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+
+        if press_ctrl:
+            flags = (QItemSelectionModel.SelectionFlag.Deselect
+                     if self._is_column_selected(col)
+                     else QItemSelectionModel.SelectionFlag.Select)
+            selection_model.select(item_range,
+                                   flags |
+                                   QItemSelectionModel.SelectionFlag.Columns)
+        else:
+            selection_model.clearSelection()
+            selection_model.select(item_range,
+                                   QItemSelectionModel.SelectionFlag.Select |
+                                   QItemSelectionModel.SelectionFlag.Columns)
+
+        self._table.setCurrentIndex(self._model.index(0, col))
+
+    def _on_header_menu(self, pos):
+        header = self._table.horizontalHeader()
+        col = header.logicalIndexAt(pos)
+        if col < 0:
+            return
+
+        menu = QMenu(self)
+        action_sort_asc = menu.addAction("Sort Ascending")
+        action_sort_desc = menu.addAction("Sort Descending")
+        action_clear_select = menu.addAction("Clear Selection")
+        action_print_selection = menu.addAction("Print Selection")
+
+        selection_model = self._table.selectionModel()
+
+        action = menu.exec(header.mapToGlobal(pos))
+
+        if action is action_sort_asc:
+            self._model.sort(col, Qt.SortOrder.AscendingOrder)
+            header.setSortIndicator(col, Qt.SortOrder.AscendingOrder)
+            header.setSortIndicatorShown(True)
+        elif action is action_sort_desc:
+            self._model.sort(col, Qt.SortOrder.DescendingOrder)
+            header.setSortIndicator(col, Qt.SortOrder.DescendingOrder)
+            header.setSortIndicatorShown(True)
+        elif action is action_clear_select:
+            selection_model.clearSelection()
+        elif action is action_print_selection:
+            self.print_selection()
+
+    def _col_range_selection(self, col: int):
+        rows = self._model.rowCount()
+        top_left = self._model.index(0, col)
+        bottom_right = self._model.index(max(rows - 1, 0), col)
+        return QItemSelection(top_left, bottom_right)
+
+    def _is_column_selected(self, col: int):
+        selection_model = self._table.selectionModel()
+        return selection_model.isColumnSelected(col, QModelIndex())
+
+    def print_selection(self):
+        selection_model = self._table.selectionModel()
+        if not selection_model:
+            return
+        cols = [idx.column() for idx in selection_model.selectedColumns()]
+        if not cols:
+            return
+
+        selection = self._model._df.iloc[:, cols]
+        print(selection)
