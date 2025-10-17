@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton,
                                QWidget, QVBoxLayout, QFrame,
                                QLabel, QFileDialog, QTableView, QStackedLayout, QHBoxLayout, QPlainTextEdit,
-                               QSizePolicy)
-from PySide6.QtCore import Qt, Signal
+                               QSizePolicy, QHeaderView, QAbstractItemView, QMenu)
+from PySide6.QtCore import Qt, Signal, QItemSelection, QItemSelectionModel
 from back_end import build_ext_filter
 from ui.gui_dataframemodel import DataFrameModel
 import pandas as pd
@@ -129,21 +129,46 @@ class DropZoneUI(QFrame):
             self.fileSelected.emit(filename)
 
     def set_preview(self, df: pd.DataFrame, source_path: str | None = None):
-        self._model.set_df(df if df is not None else pd.DataFrame())
+        preview_df = df.head(20).copy()
+        self._model.set_df(preview_df if preview_df is not None else pd.DataFrame())
 
+        # Table
         self._table.setMinimumHeight(160)
-        self._table.setMaximumWidth(400)
-        self._table.setSortingEnabled(True)
+        self._table.setMinimumWidth(100)
+        self._table.setSortingEnabled(False)
         self._table.setAcceptDrops(False)
         self._table.resizeColumnsToContents()
         self._table.resizeRowsToContents()
-        self._table.verticalHeader().setVisible(False)
         self._table.setFrameShape(QFrame.NoFrame)
         self._table.setShowGrid(True)
-        self._table.horizontalHeader().setStretchLastSection(False)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectColumns)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
-        header = self._table.horizontalHeader()
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        # Headers
+        vert_header = self._table.verticalHeader()
+        vert_header.setVisible(True)
+        vert_header.setFixedWidth(25)
+
+        h_header = self._table.horizontalHeader()
+        h_header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        h_header.setStretchLastSection(False)
+        h_header.setDefaultSectionSize(50)
+        h_header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        self._table.resizeColumnsToContents()
+
+        MAX_WIDTH = 60
+        for col in range(self._model.columnCount()):
+            width = min(self._table.columnWidth(col), MAX_WIDTH)
+            self._table.setColumnWidth(col, width)
+            h_header.setSectionResizeMode(col, QHeaderView.Fixed)
+
+        h_header.setSectionsClickable(True)
+        h_header.setSectionResizeMode(QHeaderView.Interactive)
+        h_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        h_header.customContextMenuRequested.connect(self._on_header_menu)
+        h_header.sectionClicked.connect(self._on_header_click)
+
+
         if source_path:
             name = os.path.basename(source_path)
             self.set_status_text(f"{name} :: {len(df)} rows :: {len(df.columns)} columns")
@@ -161,3 +186,41 @@ class DropZoneUI(QFrame):
 
         self.status.horizontalScrollBar().setValue(0)
 
+    def _on_header_click(self, table_index: int):
+        rows = self._model.rowCount()
+        if rows == 0:
+            return
+        top_left = self._model.index(0, table_index)
+        bottom_right = self._model.index(rows - 1, table_index)
+        selection = QItemSelection(top_left, bottom_right)
+
+        selection_model = self._table.selectionModel()
+        mods = QApplication.keyboardModifiers()
+        if not (mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)):
+            selection_model.clearSelection()
+
+        selection_model.select(selection, QItemSelectionModel.SelectionFlag.Select |
+                               QItemSelectionModel.SelectionFlag.Columns)
+        self._table.setCurrentIndex(top_left)
+
+    def _on_header_menu(self, pos):
+        header = self._table.horizontalHeader()
+        l_index = header.logicalIndexAt(pos)
+        if l_index < 0:
+            return
+        menu = QMenu(self)
+        action_select = menu.addAction("Select Column")
+        action_sort_asc = menu.addAction("Sort Ascending")
+        action_sort_desc = menu.addAction("Sort Descending")
+
+        action = menu.exec(header.mapToGlobal(pos))
+        if action is action_select:
+            self._on_header_click(l_index)
+        elif action is action_sort_asc:
+            self._model.sort(l_index, Qt.SortOrder.AscendingOrder)
+            header.setSortIndicator(l_index, Qt.SortOrder.AscendingOrder)
+            header.setSortIndicatorShown(True)
+        elif action is action_sort_desc:
+            self._model.sort(l_index, Qt.SortOrder.DescendingOrder)
+            header.setSortIndicator(l_index, Qt.SortOrder.DescendingOrder)
+            header.setSortIndicatorShown(True)
