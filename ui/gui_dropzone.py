@@ -1,8 +1,8 @@
-from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton,
+from PySide6.QtWidgets import (QApplication, QPushButton,
                                QWidget, QVBoxLayout, QFrame,
                                QLabel, QFileDialog, QTableView, QStackedLayout, QHBoxLayout, QPlainTextEdit,
                                QSizePolicy, QHeaderView, QAbstractItemView, QMenu)
-from PySide6.QtCore import Qt, Signal, QItemSelection, QItemSelectionModel
+from PySide6.QtCore import Qt, Signal, QItemSelection, QItemSelectionModel, QModelIndex
 from back_end import build_ext_filter
 from ui.gui_dataframemodel import DataFrameModel
 import pandas as pd
@@ -174,10 +174,6 @@ class DropZoneUI(QFrame):
             self.set_status_text(f"{name} :: {len(df)} rows :: {len(df.columns)} columns")
         self.stack.setCurrentIndex(1)
 
-    def clear_preview(self):
-        self._model.set_df(pd.DataFrame())
-        self.status.setText("")
-        self.stack.setCurrentIndex(0)
 
     def set_status_text(self, text: str, tooltip: bool = True):
         self.status.setPlainText(text)
@@ -186,41 +182,76 @@ class DropZoneUI(QFrame):
 
         self.status.horizontalScrollBar().setValue(0)
 
-    def _on_header_click(self, table_index: int):
-        rows = self._model.rowCount()
-        if rows == 0:
-            return
-        top_left = self._model.index(0, table_index)
-        bottom_right = self._model.index(rows - 1, table_index)
-        selection = QItemSelection(top_left, bottom_right)
-
+    def _on_header_click(self, col: int):
         selection_model = self._table.selectionModel()
-        mods = QApplication.keyboardModifiers()
-        if not (mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)):
-            selection_model.clearSelection()
+        if self._model.rowCount() == 0:
+            return
 
-        selection_model.select(selection, QItemSelectionModel.SelectionFlag.Select |
-                               QItemSelectionModel.SelectionFlag.Columns)
-        self._table.setCurrentIndex(top_left)
+        item_range = self._col_range_selection(col)
+        mods = QApplication.keyboardModifiers()
+        press_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+
+        if press_ctrl:
+            flags = (QItemSelectionModel.SelectionFlag.Deselect
+                     if self._is_column_selected(col)
+                     else QItemSelectionModel.SelectionFlag.Select)
+            selection_model.select(item_range,
+                                   flags |
+                                   QItemSelectionModel.SelectionFlag.Columns)
+        else:
+            selection_model.clearSelection()
+            selection_model.select(item_range,
+                                   QItemSelectionModel.SelectionFlag.Select |
+                                   QItemSelectionModel.SelectionFlag.Columns)
+
+        self._table.setCurrentIndex(self._model.index(0, col))
 
     def _on_header_menu(self, pos):
         header = self._table.horizontalHeader()
-        l_index = header.logicalIndexAt(pos)
-        if l_index < 0:
+        col = header.logicalIndexAt(pos)
+        if col < 0:
             return
+
         menu = QMenu(self)
-        action_select = menu.addAction("Select Column")
         action_sort_asc = menu.addAction("Sort Ascending")
         action_sort_desc = menu.addAction("Sort Descending")
+        action_clear_select = menu.addAction("Clear Selection")
+        action_print_selection = menu.addAction("Print Selection")
+
+        selection_model = self._table.selectionModel()
 
         action = menu.exec(header.mapToGlobal(pos))
-        if action is action_select:
-            self._on_header_click(l_index)
-        elif action is action_sort_asc:
-            self._model.sort(l_index, Qt.SortOrder.AscendingOrder)
-            header.setSortIndicator(l_index, Qt.SortOrder.AscendingOrder)
+
+        if action is action_sort_asc:
+            self._model.sort(col, Qt.SortOrder.AscendingOrder)
+            header.setSortIndicator(col, Qt.SortOrder.AscendingOrder)
             header.setSortIndicatorShown(True)
         elif action is action_sort_desc:
-            self._model.sort(l_index, Qt.SortOrder.DescendingOrder)
-            header.setSortIndicator(l_index, Qt.SortOrder.DescendingOrder)
+            self._model.sort(col, Qt.SortOrder.DescendingOrder)
+            header.setSortIndicator(col, Qt.SortOrder.DescendingOrder)
             header.setSortIndicatorShown(True)
+        elif action is action_clear_select:
+            selection_model.clearSelection()
+        elif action is action_print_selection:
+            self.print_selection()
+
+    def _col_range_selection(self, col: int):
+        rows = self._model.rowCount()
+        top_left = self._model.index(0, col)
+        bottom_right = self._model.index(max(rows - 1, 0), col)
+        return QItemSelection(top_left, bottom_right)
+
+    def _is_column_selected(self, col: int):
+        selection_model = self._table.selectionModel()
+        return selection_model.isColumnSelected(col, QModelIndex())
+
+    def print_selection(self):
+        selection_model = self._table.selectionModel()
+        if not selection_model:
+            return
+        cols = [idx.column() for idx in selection_model.selectedColumns()]
+        if not cols:
+            return
+
+        selection = self._model._df.iloc[:, cols]
+        print(selection)
