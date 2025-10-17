@@ -143,6 +143,9 @@ class DropZoneUI(QFrame):
         self._table.setShowGrid(True)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectColumns)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_table_menu,
+                                                       Qt.ConnectionType.UniqueConnection)
 
         # Headers
         vert_header = self._table.verticalHeader()
@@ -165,7 +168,8 @@ class DropZoneUI(QFrame):
         h_header.setSectionsClickable(True)
         h_header.setSectionResizeMode(QHeaderView.Interactive)
         h_header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        h_header.customContextMenuRequested.connect(self._on_header_menu)
+        h_header.customContextMenuRequested.connect(self._on_header_menu,
+                                                    Qt.ConnectionType.UniqueConnection)
         h_header.sectionClicked.connect(self._on_header_click)
 
 
@@ -215,8 +219,8 @@ class DropZoneUI(QFrame):
         menu = QMenu(self)
         action_sort_asc = menu.addAction("Sort Ascending")
         action_sort_desc = menu.addAction("Sort Descending")
-        action_clear_select = menu.addAction("Clear Selection")
         action_print_selection = menu.addAction("Print Selection")
+        action_clear_select = menu.addAction("Clear Selection")
 
         selection_model = self._table.selectionModel()
 
@@ -234,6 +238,44 @@ class DropZoneUI(QFrame):
             selection_model.clearSelection()
         elif action is action_print_selection:
             self.print_selection()
+
+    def _on_table_menu(self, pos):
+        menu = QMenu(self)
+        index = self._table.indexAt(pos)
+
+        action_sort_asc = menu.addAction("Sort Ascending")
+        action_sort_desc = menu.addAction("Sort Descending")
+        action_print_selection = menu.addAction("Print Selection")
+        action_clear_select = menu.addAction("Clear Selection")
+
+        col = index.column() if index.isValid() else None
+        if col is not None:
+            col_name = self._model.headerData(col,
+                                              Qt.Orientation.Horizontal,
+                                              Qt.ItemDataRole.DisplayRole)
+            menu.setTitle(f"Column : {col_name}")
+
+        action = menu.exec(self._table.viewport().mapToGlobal(pos))
+
+        if action is action_print_selection:
+            self.print_selection()
+        elif action is action_clear_select:
+            selection_model = self._table.selectionModel()
+            if selection_model:
+                selection_model.clearSelection()
+        elif col is not None:
+            if action is action_sort_asc:
+                self._model.sort(col, Qt.SortOrder.AscendingOrder)
+                self._table.horizontalHeader().setSortIndicator(
+                    col,
+                    Qt.SortOrder.AscendingOrder)
+                self._table.horizontalHeader().setSortIndicatorShown(True)
+            elif action is action_sort_desc:
+                self._model.sort(col, Qt.SortOrder.DescendingOrder)
+                self._table.horizontalHeader().setSortIndicator(
+                    col,
+                    Qt.SortOrder.DescendingOrder)
+                self._table.horizontalHeader().setSortIndicatorShown(True)
 
     def _col_range_selection(self, col: int):
         rows = self._model.rowCount()
